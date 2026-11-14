@@ -4,8 +4,6 @@ from mcp.server import MCPServer
 
 from .client import Trading212Client
 from .models import (
-    AccountBucketInstrumentsDetailedResponse,
-    AccountBucketResultResponse,
     AccountSummary,
     Cash,
     Exchange,
@@ -83,18 +81,6 @@ def register(mcp: MCPServer, get_client: Callable[[], Trading212Client]) -> None
     def get_order_by_id(order_id: int) -> Order:
         """Fetch a specific order by ID."""
         return get_client().get_order_by_id(order_id)
-
-    @mcp.resource("trading212://pies")
-    @safe_handler
-    def get_pies() -> list[AccountBucketResultResponse]:
-        """Fetch all pies."""
-        return get_client().get_pies()
-
-    @mcp.resource("trading212://pies/{pie_id}")
-    @safe_handler
-    def get_pie_by_id(pie_id: int) -> AccountBucketInstrumentsDetailedResponse:
-        """Fetch a specific pie by ID."""
-        return get_client().get_pie_by_id(pie_id)
 
     @mcp.resource("trading212://instruments")
     @safe_handler

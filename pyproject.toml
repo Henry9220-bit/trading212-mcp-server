@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trading212-mcp-server"
-version = "0.2.0"
-description = "MCP server for the Trading 212 public API"
+version = "0.3.0+readonly"
+description = "Read-only MCP server for the Trading 212 public API"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

@@ -55,9 +55,9 @@ def test_stdio_handshake_discovery_and_shutdown(args, tmp_path):
             )
         ) as client:
             result = await client.list_tools()
-            assert len(result.tools) == 28
-            assert len((await client.list_resources()).resources) == 11
-            assert len((await client.list_resource_templates()).resource_templates) == 5
+            assert len(result.tools) == 17
+            assert len((await client.list_resources()).resources) == 10
+            assert len((await client.list_resource_templates()).resource_templates) == 4
             assert (await client.list_prompts()).prompts[
                 0
             ].name == "analyse_trading212_data"
@@ -70,6 +70,7 @@ def test_stdio_handshake_discovery_and_shutdown(args, tmp_path):
     [
         ("environment", "evil"),
         ("transport", "invalid"),
+        ("transport", "sse"),
         ("account_ttl", -1),
         ("metadata_ttl", float("inf")),
         ("api_key", ""),
@@ -99,6 +100,7 @@ def test_http_binding_and_protection(monkeypatch):
         TradingServer, "run", lambda self, **kwargs: calls.append(kwargs)
     )
     main()
+    assert calls[0]["transport"] == "streamable-http"
     assert calls[0]["host"] == "127.0.0.1"
     protection = calls[0]["transport_security"]
     assert protection.enable_dns_rebinding_protection
@@ -138,3 +140,24 @@ def test_http_rejects_untrusted_host_and_origin(settings):
                 assert bad_origin.status_code == 403
 
     asyncio.run(run())
+
+
+def test_default_environment_is_demo_and_transport_is_stdio(monkeypatch):
+    monkeypatch.setenv("TRADING212_API_KEY", "synthetic-default")
+    settings = Settings.from_env()
+    assert settings.environment == "demo"
+    assert settings.transport == "stdio"
+
+
+def test_sse_transport_is_not_offered(monkeypatch):
+    from trading212_mcp.server import TradingServer, main
+
+    calls = []
+    monkeypatch.setenv("TRADING212_API_KEY", "synthetic-sse")
+    monkeypatch.setenv("TRANSPORT", "sse")
+    monkeypatch.setattr(
+        TradingServer, "run", lambda self, **kwargs: calls.append(kwargs)
+    )
+    with pytest.raises(SystemExit, match="TRANSPORT"):
+        main()
+    assert calls == []

@@ -1,5 +1,13 @@
 # Repository instructions
 
+## Read-only fork
+
+This fork must never change a Trading 212 account. Do not add an HTTP method
+other than `GET`, an endpoint outside `ALLOWED_PATHS` in
+`src/trading212_mcp/client.py`, or a tool that places or cancels orders, edits
+pies, or requests exports. Never use real API keys or make live Trading 212
+requests; tests use mock transports. Never read, print or commit `.env`.
+
 ## Branch names
 
 Do not use a `codex/` prefix when creating branches in this repository.
@@ -25,7 +33,7 @@ sync—use the repository skill at
 resolve relevant drift in the snapshot, implementation, tests, and user-facing
 documentation.
 
-Do not invent request restrictions that the public schema does not define.
-Keep outbound mutation validation safe, but make response parsing resilient to
-additive upstream fields and audit every changed enum. Schema checks must not
-use account credentials or call live trading endpoints.
+Make response parsing resilient to additive upstream fields and audit every
+changed enum. The snapshot documents write endpoints; this fork does not
+implement them. Schema checks must not use account credentials or call live
+trading endpoints.

@@ -1,8 +1,11 @@
-"""Credential-free Hishel storage with serialized cross-process invalidation.
+"""Credential-free Hishel storage for read-only (GET) requests.
 
 The network sender is the only component that knows credentials. Cache requests
 contain an allowlist of headers; private namespaces never rely on upstream Vary.
-A file lock covers request, body consumption, and invalidation across processes.
+A file lock covers the request and body consumption across processes. This
+server never mutates the account, so it never advances the private generation;
+it still reads it so that a write-capable process sharing the cache directory
+can invalidate these entries.
 """
 
 import hashlib
@@ -54,7 +57,7 @@ class SuccessfulResponse(BaseFilter[Response]):
 
 
 class NamespacedStorage(SyncSqliteStorage):
-    """Generation keys make pre-mutation private entries unreachable."""
+    """Generation keys make entries from an older generation unreachable."""
 
     generation: str = "0"
     ttl: float = 0
@@ -108,11 +111,15 @@ class ResponseCache:
 
     def request(
         self,
-        method: str,
         url: str,
         sender: Callable[[Request], Response],
         validate: Callable[[bytes], object] | None = None,
     ) -> bytes:
+        """Serve one GET from the cache or through ``sender``.
+
+        There is deliberately no method argument: the cache layer can only
+        build GET requests.
+        """
         if self.closed:
             raise RequestError("The API client is closed.")
         path = url.split("?", 1)[0]
@@ -127,7 +134,7 @@ class ResponseCache:
             )
         )
         request = Request(
-            method=method, url=url, headers=Headers({}), metadata={"hishel_ttl": ttl}
+            method="GET", url=url, headers=Headers({}), metadata={"hishel_ttl": ttl}
         )
 
         def validated_sender(request: Request) -> Response:
@@ -151,49 +158,34 @@ class ResponseCache:
                     ).fetchone()
                     self.storage.generation = "metadata" if metadata else str(row[0])
                     self.storage.ttl = ttl
-                try:
-                    if method == "GET" and ttl > 0:
-                        proxy = SyncCacheProxy(
-                            validated_sender,
-                            storage=self.storage,
-                            policy=FilterPolicy(
-                                response_filters=[SuccessfulResponse()]
+                if ttl > 0:
+                    proxy = SyncCacheProxy(
+                        validated_sender,
+                        storage=self.storage,
+                        policy=FilterPolicy(response_filters=[SuccessfulResponse()]),
+                    )
+                    response = proxy.handle_request(request)
+                else:
+                    response = validated_sender(request)
+                # Hishel writes streaming bodies lazily: consume while holding the lock.
+                body = response.read()
+                recorded = observations.get()
+                if recorded is not None:
+                    fetched = response.headers.get("x-trading212-retrieved-at")
+                    recorded.append(
+                        {
+                            "cacheHit": bool(
+                                response.metadata.get("hishel_from_cache", False)
                             ),
-                        )
-                        response = proxy.handle_request(request)
-                    else:
-                        response = validated_sender(request)
-                    # Hishel writes streaming bodies lazily: consume while holding the lock.
-                    body = response.read()
-                    recorded = observations.get()
-                    if recorded is not None:
-                        fetched = response.headers.get("x-trading212-retrieved-at")
-                        recorded.append(
-                            {
-                                "cacheHit": bool(
-                                    response.metadata.get("hishel_from_cache", False)
-                                ),
-                                "retrievedAt": datetime.fromtimestamp(
-                                    float(fetched), UTC
-                                ).isoformat()
-                                if fetched is not None
-                                else datetime.now(UTC).isoformat(),
-                                "ttlSeconds": ttl if method == "GET" else 0,
-                            }
-                        )
-                    return body
-                finally:
-                    if method != "GET":
-                        # Conservative even on errors: the server may have applied a mutation.
-                        with (
-                            closing(
-                                sqlite3.connect(self.path / "state.sqlite")
-                            ) as state,
-                            state,
-                        ):
-                            state.execute(
-                                "UPDATE generation SET value=value+1 WHERE id=1"
-                            )
+                            "retrievedAt": datetime.fromtimestamp(
+                                float(fetched), UTC
+                            ).isoformat()
+                            if fetched is not None
+                            else datetime.now(UTC).isoformat(),
+                            "ttlSeconds": ttl,
+                        }
+                    )
+                return body
         except Timeout:
             raise RequestError(
                 "Another account request is still running; try again."

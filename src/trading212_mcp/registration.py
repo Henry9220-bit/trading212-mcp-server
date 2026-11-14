@@ -1,4 +1,8 @@
-"""Consistent MCP annotations and safe errors for API-backed handlers."""
+"""Read-only MCP annotations and safe errors for API-backed handlers.
+
+Annotations are descriptive hints for MCP clients. The enforced read-only
+boundary is the GET allowlist in ``client.py``.
+"""
 
 from collections.abc import Callable
 from functools import wraps
@@ -14,11 +18,12 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def annotations(*, write: bool) -> ToolAnnotations:
+def annotations() -> ToolAnnotations:
+    """Every tool on this server is read-only; there is no write variant."""
     return ToolAnnotations(
-        read_only_hint=not write,
-        destructive_hint=write,
-        idempotent_hint=not write,
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
         open_world_hint=True,
     )
 

@@ -1,18 +1,28 @@
 import base64
 import os
+import sqlite3
 import stat
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from threading import Event
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 
 import httpx
 import pytest
 
 from trading212_mcp.cache import observations
 from trading212_mcp.client import Trading212Client
-from trading212_mcp.errors import UpstreamError
+from trading212_mcp.errors import RequestError, UpstreamError
 from trading212_mcp.settings import Settings
 
 PATH = "/equity/orders"
+WRITE_METHODS = ["POST", "PUT", "PATCH", "DELETE"]
+
+
+def generation(c, bump=False):
+    """Read the private-cache generation, as another process would see it."""
+    with closing(sqlite3.connect(c.cache.path / "state.sqlite")) as state, state:
+        if bump:
+            state.execute("UPDATE generation SET value=value+1 WHERE id=1")
+        return state.execute("SELECT value FROM generation WHERE id=1").fetchone()[0]
 
 
 def client(settings, calls):
@@ -154,63 +164,55 @@ def test_reduced_ttl_applies_to_persisted_entries(
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("method", ["POST", "DELETE"])
-def test_mutations_invalidate_private_but_not_metadata(settings, method):
+@pytest.mark.parametrize("method", WRITE_METHODS)
+def test_rejected_writes_leave_cache_and_generation_untouched(settings, method):
     calls = []
     with client(settings, calls) as c:
-        c._make_request("GET", PATH)
+        cached = c._make_request("GET", PATH)
         metadata = c._make_request("GET", "/equity/metadata/instruments")
-        c._make_request(method, PATH)
-        assert c._make_request("GET", PATH)["count"] == 4
+        before = generation(c)
+        with pytest.raises(RequestError, match="only GET is allowed"):
+            c._make_request(method, PATH)
+        assert generation(c) == before
+        # Still served from the cache: the refused write invalidated nothing.
+        assert c._make_request("GET", PATH) == cached
         assert c._make_request("GET", "/equity/metadata/instruments") == metadata
-        c._make_request(method, PATH)
-    assert len(calls) == 5
+    assert [req.method for req in calls] == ["GET", "GET"]
 
 
-def test_uncertain_mutation_invalidates_without_retry(settings):
+@pytest.mark.parametrize("method", WRITE_METHODS)
+def test_write_is_refused_before_a_failing_network(settings, method):
     calls = []
 
     def respond(req):
         calls.append(req)
-        if req.method == "POST":
-            raise httpx.ReadTimeout("SYNTHETIC SENSITIVE DETAIL")
-        return httpx.Response(200, json={"call": len(calls)})
+        raise httpx.ReadTimeout("SYNTHETIC SENSITIVE DETAIL")
 
-    with Trading212Client(settings, transport=httpx.MockTransport(respond)) as c:
-        c._make_request("GET", PATH)
-        with pytest.raises(UpstreamError, match="outcome may be unknown"):
-            c._make_request("POST", PATH)
-        assert c._make_request("GET", PATH) == {"call": 3}
-    assert [r.method for r in calls] == ["GET", "POST", "GET"]
+    with Trading212Client(
+        settings, transport=httpx.MockTransport(respond), sleep=lambda _: None
+    ) as c:
+        # A write is a request error, never an "outcome unknown" upstream error.
+        with pytest.raises(RequestError) as refused:
+            c._make_request(method, PATH)
+        assert calls == []
+        with pytest.raises(UpstreamError) as failed:
+            c._make_request("GET", PATH)
+    assert [req.method for req in calls] == ["GET"] * 3
+    for error in (refused, failed):
+        assert "SYNTHETIC SENSITIVE DETAIL" not in str(error.value)
 
 
-def test_concurrent_read_cannot_repopulate_old_generation(settings):
-    started, release = Event(), Event()
+def test_external_generation_bump_invalidates_private_cache(settings):
+    """A write-capable process sharing the directory can still invalidate reads."""
     calls = []
-
-    def respond(req):
-        calls.append(req.method)
-        if len(calls) == 1:
-            started.set()
-            assert release.wait(5)
-        return httpx.Response(200, json={"call": len(calls)})
-
-    with (
-        Trading212Client(settings, transport=httpx.MockTransport(respond)) as a,
-        Trading212Client(settings, transport=httpx.MockTransport(respond)) as b,
-        ThreadPoolExecutor(2) as pool,
-    ):
-        read = pool.submit(a._make_request, "GET", PATH)
-        assert started.wait(5)
-        write = pool.submit(b._make_request, "POST", PATH)
-        try:
-            with pytest.raises(TimeoutError):
-                write.result(timeout=0.1)
-        finally:
-            release.set()
-        read.result(timeout=5)
-        write.result(timeout=5)
-        assert a._make_request("GET", PATH) == {"call": 3}
+    with client(settings, calls) as c:
+        assert c._make_request("GET", PATH) == {"count": 1}
+        metadata = c._make_request("GET", "/equity/metadata/instruments")
+        before = generation(c)
+        assert generation(c, bump=True) == before + 1
+        assert c._make_request("GET", PATH) == {"count": 3}
+        assert c._make_request("GET", "/equity/metadata/instruments") == metadata
+    assert len(calls) == 3
 
 
 def test_same_account_concurrent_clients_share_cache(settings):

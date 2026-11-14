@@ -1859,7 +1859,7 @@ wheels = [
 
 [[package]]
 name = "trading212-mcp-server"
-version = "0.2.0"
+version = "0.3.0+readonly"
 source = { editable = "." }
 dependencies = [
     { name = "filelock" },
