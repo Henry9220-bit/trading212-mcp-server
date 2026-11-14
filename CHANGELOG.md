@@ -31,6 +31,11 @@ Added:
   requests per minute.
 - `fetch_open_lots` reports `history_cached_at` and explains a mismatch that
   may come from a trade made after the order history was cached.
+- Clear errors for a ticker Trading 212 does not recognise and for an order ID
+  with no pending order, instead of a bare HTTP 404.
+- The fee note now states what a read-only check of real fills showed:
+  `netValue` includes the currency conversion fee. Other charges remain
+  unconfirmed, and the API schema still documents none of this.
 - `tests/test_readonly.py`, `tests/test_lots.py` and
   `tests/test_credentials.py`, including static checks that the source holds no
   write method names and a single HTTP call site.

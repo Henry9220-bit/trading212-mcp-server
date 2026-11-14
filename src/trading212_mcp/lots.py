@@ -3,20 +3,30 @@
 Pure computation: no network, cache, clock or filesystem access. The caller
 supplies the fetched history, the open positions and the current time.
 
-Field sources are the Trading 212 OpenAPI snapshot in ``docs/api.json``:
+Field sources are the Trading 212 OpenAPI snapshot in ``docs/api.json``. Where
+the snapshot is silent, the text below separates what was observed in real
+responses (a read-only check of a live account in November 2026, with a GBP
+account holding USD instruments) from what is documented. Observations are not
+guarantees, so the code does not depend on them where it can avoid it.
 
 * Direction comes from ``order.side`` (BUY / SELL) and size from
   ``abs(fill.quantity)``. The snapshot gives ``Fill.quantity`` no description
   and describes ``Order.filledQuantity`` only as "the number of shares that
   have been successfully executed". The one documented sign convention is for
   *placing* orders ("To execute a sell order, you must provide a negative value
-  for the quantity parameter"). Whether a historical sell fill is reported as
-  negative is therefore undocumented, so the sign is never trusted.
-* ``Fill.price`` and ``FillWalletImpact.netValue`` have no description in the
-  snapshot. ``Position.averagePricePaid`` is documented as "in instrument
-  currency", and ``fill.price`` is treated the same way. Whether ``netValue``
-  already includes fees and taxes is not stated, so it is reported as
-  unconfirmed rather than guessed.
+  for the quantity parameter"). Observed: sell fills do carry a negative
+  quantity. Because that is undocumented, the sign is still never trusted.
+* ``Fill.price`` has no description in the snapshot.
+  ``Position.averagePricePaid`` is documented as "in instrument currency", and
+  ``fill.price`` is treated the same way. Observed: the FIFO average of
+  ``fill.price`` equals ``averagePricePaid``.
+* ``FillWalletImpact.netValue`` and ``fxRate`` have no description either.
+  Observed: ``fxRate`` is instrument currency per unit of account currency,
+  and ``netValue`` is a positive amount in account currency that includes the
+  currency conversion fee listed under ``taxes``: for a buy it is
+  ``price * quantity / fxRate`` plus the fee, for a sell the same amount minus
+  the fee. Other charges, such as stamp duty, have not been observed, so
+  whether ``netValue`` includes them is reported as unconfirmed.
 * ``Fill.type`` distinguishes TRADE from corporate actions and transfers
   (STOCK_SPLIT, FOP, SPIN_OFF, ...). Only TRADE fills are replayed. The others
   are reported, never converted into lots.
@@ -52,13 +62,17 @@ TRADE = "TRADE"
 
 FEES_NOTE = (
     "cost_account_currency is abs(fill.walletImpact.netValue), split by the "
-    "share of the lot still held. Not confirmed whether netValue includes "
-    "fees and taxes: docs/api.json does not describe the field."
+    "share of the lot still held. Observed on real fills, though the API "
+    "schema does not document it: netValue includes the currency conversion "
+    "fee, so a buy's cost is price x quantity / fx_rate plus that fee, and it "
+    "is slightly higher than the position's totalCost, which excludes the fee. "
+    "Not confirmed whether netValue includes other charges such as stamp duty."
 )
 CURRENCY_NOTE = (
     "price_native and cost_native are in the instrument currency "
     "(instrument_currency; GBX is pence, 100 GBX = 1 GBP). "
-    "cost_account_currency is in account_currency."
+    "cost_account_currency is in account_currency. fx_rate was observed to be "
+    "instrument currency per unit of account currency."
 )
 METHOD_NOTE = (
     "Lots are rebuilt by replaying FILLED TRADE fills oldest first and matching "

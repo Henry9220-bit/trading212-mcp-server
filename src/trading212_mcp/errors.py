@@ -17,6 +17,10 @@ class UpstreamError(Trading212Error):
     pass
 
 
+class NotFoundError(UpstreamError):
+    """HTTP 404: the ticker, order or path is unknown to Trading 212."""
+
+
 class InvalidResponseError(Trading212Error):
     pass
 

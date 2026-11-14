@@ -8,6 +8,7 @@ from trading212_mcp.client import Trading212Client
 from trading212_mcp.errors import (
     AuthenticationError,
     InvalidResponseError,
+    NotFoundError,
     RateLimitError,
     RequestError,
     UpstreamError,
@@ -194,6 +195,7 @@ def test_write_request_models_do_not_exist(name):
         (500, UpstreamError),
         (302, UpstreamError),
         (400, UpstreamError),
+        (404, NotFoundError),
     ],
 )
 def test_errors_and_retry_limit(settings, status, error):
@@ -277,6 +279,34 @@ def test_rejects_unsafe_paths(settings, path):
     with Trading212Client(settings) as c:
         with pytest.raises(RequestError):
             c._make_request("GET", path)
+
+
+def test_not_found_is_explained_where_the_cause_is_known(settings):
+    calls = []
+
+    def respond(req):
+        calls.append(req)
+        return httpx.Response(404, text="synthetic-account-private-data")
+
+    with Trading212Client(settings, transport=httpx.MockTransport(respond)) as c:
+        # A ticker Trading 212 does not know, such as a bare symbol.
+        for lookup in (c.get_positions, c.get_position_by_ticker):
+            with pytest.raises(
+                RequestError, match="does not recognise that ticker"
+            ) as e:
+                lookup("SYNTHETIC-TICKER")
+            assert "SYNTHETIC-TICKER" not in str(e.value)
+            assert "synthetic-account-private-data" not in str(e.value)
+        with pytest.raises(RequestError, match="No pending order was found") as e:
+            c.get_order_by_id(12)
+        assert "12" not in str(e.value)
+        # Without a ticker there is no better explanation than the status.
+        with pytest.raises(NotFoundError, match="HTTP 404"):
+            c.get_positions()
+        with pytest.raises(NotFoundError, match="HTTP 404"):
+            c.get_historical_order_data(ticker="SYNTHETIC-TICKER")
+    # A 404 is a definite answer and is never retried.
+    assert len(calls) == 5
 
 
 def test_empty_success_body_is_none(settings):

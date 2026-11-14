@@ -256,7 +256,11 @@ def test_cost_in_account_currency_follows_the_remaining_share():
     assert first.cost_account_currency == pytest.approx(400.4 * 3 / 4)
     assert first.cost_native == 30.0
     assert second.cost_account_currency == 90.0
-    assert FEES_NOTE in result.notes and "Not confirmed" in FEES_NOTE
+    # The note states what was observed and what is still unknown.
+    assert FEES_NOTE in result.notes
+    assert "includes the currency conversion fee" in FEES_NOTE
+    assert "does not document it" in FEES_NOTE
+    assert "Not confirmed whether netValue includes other charges" in FEES_NOTE
 
 
 def test_corporate_action_and_transfer_fills_are_flagged_not_replayed():
@@ -590,7 +594,7 @@ def test_tool_returns_reconciled_lots_over_all_pages(settings):
         40,
     )
     assert any(
-        "Not confirmed whether netValue includes fees" in n for n in data["notes"]
+        "netValue includes the currency conversion fee" in n for n in data["notes"]
     )
     assert {req.method for req in calls} == {"GET"}
     assert all(req.url.params.get("ticker") == AAPL for req in calls)
@@ -647,6 +651,30 @@ def test_tool_reports_a_trade_made_after_the_history_was_cached(settings):
     assert summary["reconciled"] is False and summary["difference"] == -1.0
     assert any("came from the cache" in note for note in summary["notes"])
     assert any("served from the cache" in note for note in second["notes"])
+
+
+def test_tool_explains_an_unknown_ticker(settings):
+    """Trading 212 answers 404 for a ticker it does not know, e.g. a bare symbol."""
+    calls = []
+
+    def respond(req):
+        calls.append(req)
+        return httpx.Response(404, text="private upstream detail")
+
+    def factory(settings):
+        return Trading212Client(settings, transport=httpx.MockTransport(respond))
+
+    async def run():
+        async with Client(create_server(settings, factory)) as session:
+            return await session.call_tool("fetch_open_lots", {"ticker": "AAPL"})
+
+    result = asyncio.run(run())
+    assert result.is_error
+    text = str(result)
+    assert "does not recognise that ticker" in text and "AAPL_US_EQ" in text
+    assert "private upstream detail" not in text
+    # Positions are asked first, so no history page is fetched for a bad ticker.
+    assert [req.url.path.rsplit("/", 1)[-1] for req in calls] == ["positions"]
 
 
 def test_tool_clamps_max_pages_and_treats_blank_ticker_as_all(settings):

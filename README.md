@@ -276,7 +276,7 @@ tool's convention for analysis. It is not a broker statement or a tax record.
 | `cost_native` | `price_native × quantity_remaining` |
 | `cost_account_currency` | Share of the buy's `walletImpact.netValue` still held, as a positive number |
 | `account_currency` | Currency of `cost_account_currency` (`walletImpact.currency`) |
-| `fx_rate` | `walletImpact.fxRate` of the fill |
+| `fx_rate` | `walletImpact.fxRate` of the fill; observed to be instrument currency per unit of account currency |
 | `fill_id`, `order_id` | Identifiers from Trading 212 |
 | `holding_days` | Whole days from `filled_at` to now |
 
@@ -293,11 +293,27 @@ is 1 GBP. `cost_account_currency` is in your account currency and is the only
 cost figure that can be added up across instruments.
 
 **Fees.** `cost_account_currency` is taken from `fill.walletImpact.netValue`.
-The API schema gives that field no description, so it is **not confirmed
-whether it includes fees and taxes** such as stamp duty or currency conversion
-fees. Likewise the schema does not describe `fill.price`; it is treated as
-being in the instrument currency, which is how the schema documents
-`position.averagePricePaid`.
+The API schema gives that field no description, so what follows comes from a
+read-only check of real fills (a GBP account holding USD shares, November
+2026), not from documentation:
+
+- `netValue` **includes the currency conversion fee**. For a buy it equals
+  `price × quantity ÷ fxRate` plus the fee, which is what left the account.
+  For a sell it is the same amount minus the fee.
+- A position's `walletImpact.totalCost` excludes that fee. The lots' costs for
+  a ticker therefore add up to slightly more than `totalCost`.
+- It is **not confirmed whether `netValue` includes other charges**, such as
+  stamp duty, because none were present in the fills checked.
+
+Likewise the schema does not describe `fill.price`. It is treated as being in
+the instrument currency, which is how the schema documents
+`position.averagePricePaid`, and the average of the lots matched that field in
+the same check.
+
+**Tickers.** Use Trading 212's full ticker, such as `AAPL_US_EQ`, not the bare
+symbol. `search_instrument` finds it, and position results show it. A ticker
+Trading 212 does not know is reported as such; a known ticker that is not held
+returns an empty result.
 
 **Time.** Trading 212 allows 20 history requests per minute. The tool waits
 three seconds between pages rather than running into the limit, so an uncached

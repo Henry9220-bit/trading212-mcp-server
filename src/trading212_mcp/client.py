@@ -24,6 +24,7 @@ from .cache import ResponseCache
 from .errors import (
     AuthenticationError,
     InvalidResponseError,
+    NotFoundError,
     RateLimitError,
     RequestError,
     UpstreamError,
@@ -47,6 +48,13 @@ T = TypeVar("T")
 
 READ_ONLY_ERROR = "Read-only server: only GET is allowed."
 NOT_ALLOWED_ERROR = "Read-only server: this endpoint is not on the allowlist."
+# Trading 212 answers a position lookup for a ticker it does not know with
+# HTTP 404, while a known ticker that is simply not held returns an empty list.
+UNKNOWN_TICKER_ERROR = (
+    "Trading 212 does not recognise that ticker. Use the full instrument "
+    "ticker, for example AAPL_US_EQ; search_instrument can look it up."
+)
+UNKNOWN_ORDER_ERROR = "No pending order was found with that ID."
 
 # Paths, relative to /api/<version>, that this server may request. Everything
 # else is refused, including every order-placement, pie and export-request
@@ -220,6 +228,8 @@ class Trading212Client:
                     raise AuthenticationError(
                         "Trading 212 authentication or permission denied."
                     )
+                if status == 404:
+                    raise NotFoundError("Trading 212 request failed (HTTP 404).")
                 if 200 <= status < 300:
                     body = response.content
                     if body:
@@ -323,9 +333,17 @@ class Trading212Client:
     def get_positions(self, ticker: str | None = None) -> list[Position]:
         """Fetch positions, optionally filtered by ticker."""
         params = {"ticker": ticker} if ticker else None
-        data = self._make_request(
-            "GET", "/equity/positions", params=params, response_schema=list[Position]
-        )
+        try:
+            data = self._make_request(
+                "GET",
+                "/equity/positions",
+                params=params,
+                response_schema=list[Position],
+            )
+        except NotFoundError:
+            if ticker:
+                raise RequestError(UNKNOWN_TICKER_ERROR) from None
+            raise
         return parse_response(list[Position], data)
 
     def get_position_by_ticker(self, ticker: str) -> Position:
@@ -383,10 +401,13 @@ class Trading212Client:
         return parse_response(list[Order], data)
 
     def get_order_by_id(self, order_id: int) -> Order:
-        """Fetch a specific order by ID."""
-        data = self._make_request(
-            "GET", f"/equity/orders/{order_id}", response_schema=Order
-        )
+        """Fetch a specific pending order by ID."""
+        try:
+            data = self._make_request(
+                "GET", f"/equity/orders/{order_id}", response_schema=Order
+            )
+        except NotFoundError:
+            raise RequestError(UNKNOWN_ORDER_ERROR) from None
         return parse_response(Order, data)
 
     def get_historical_order_data(
