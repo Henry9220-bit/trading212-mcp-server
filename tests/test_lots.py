@@ -458,7 +458,7 @@ def history_calls(calls):
 
 
 def test_rate_limit_constant_matches_the_api_snapshot():
-    spec = json.loads((ROOT / "docs/api.json").read_text())
+    spec = json.loads((ROOT / "docs/api.json").read_text(encoding="utf-8"))
     operation = spec["paths"]["/api/v0" + client_module.HISTORY_ORDERS_PATH]["get"]
     limit = re.search(
         r"Rate limit:\*\* (\d+) req / (\d+)m(\d+)s", operation["description"]

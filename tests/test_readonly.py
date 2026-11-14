@@ -22,7 +22,7 @@ from trading212_mcp.server import create_server
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = sorted((ROOT / "src").rglob("*.py"))
-BASELINE = json.loads((ROOT / "tests/fixtures/mcp_v1.json").read_text())
+BASELINE = json.loads((ROOT / "tests/fixtures/mcp_v1.json").read_text(encoding="utf-8"))
 WRITE_METHODS = ["POST", "PUT", "PATCH", "DELETE"]
 WRITE_PREFIXES = (
     "place_",
@@ -198,7 +198,7 @@ def string_literals(tree):
 def test_source_has_no_write_method_literals():
     assert len(SOURCES) > 10
     for source in SOURCES:
-        tree = ast.parse(source.read_text(), filename=str(source))
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
         for value in string_literals(tree):
             assert value.strip().upper() not in WRITE_METHODS, (source, value)
 
@@ -208,7 +208,7 @@ def test_source_has_one_http_call_site_and_it_is_get():
     forbidden = {"post", "put", "patch", "delete", "stream", "send", "build_request"}
     sites = []
     for source in SOURCES:
-        tree = ast.parse(source.read_text(), filename=str(source))
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
         for function in ast.walk(tree):
             if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue

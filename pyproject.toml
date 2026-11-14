@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
-    "filelock>=4.0.7,<5",
+    "filelock>=4.2.1,<5",
     "hishel>=1.4.0,<1.5",
     "httpx>=0.28.1,<0.29",
     "mcp>=2.2.0,<2.3",
@@ -26,8 +26,8 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/RohanAnandPandit/trading212-mcp-server"
-Issues = "https://github.com/RohanAnandPandit/trading212-mcp-server/issues"
+Repository = "https://github.com/Henry9220-bit/trading212-mcp-server"
+Upstream = "https://github.com/RohanAnandPandit/trading212-mcp-server"
 
 [project.scripts]
 trading212-mcp-server = "trading212_mcp.server:main"

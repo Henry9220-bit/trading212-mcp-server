@@ -384,7 +384,8 @@ commands. The read-only rules for contributors are short: no HTTP method other
 than `GET`, no endpoint outside the allowlist in `client.py`, and no real API
 keys or live requests in tests.
 
-Report problems with this fork in this fork's repository, not upstream.
+Do not report problems with this fork to the upstream project. See
+[SECURITY.md](.github/SECURITY.md) for how to report a security problem.
 
 ### Keeping the Trading 212 schema in sync
 

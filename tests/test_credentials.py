@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+import os
 import subprocess
 import sys
 
@@ -153,10 +154,16 @@ def test_startup_error_names_variables_but_never_values(monkeypatch, capsys):
 
 
 def test_server_without_credentials_exits_with_a_clear_error(tmp_path):
+    # Inherit the platform's environment: Windows cannot start Python reliably
+    # without variables such as SYSTEMROOT. Only the server's own settings are
+    # removed, so the missing key is the single cause of the failure.
+    ours = ("TRADING212_", "ENVIRONMENT", "TRANSPORT")
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(ours)}
+    env["UNRELATED_PRIVATE"] = "must-not-be-printed"
     result = subprocess.run(
         [sys.executable, "-m", "trading212_mcp"],
         cwd=tmp_path,
-        env={"HOME": str(tmp_path), "UNRELATED_PRIVATE": "must-not-be-printed"},
+        env=env,
         capture_output=True,
         text=True,
         timeout=60,

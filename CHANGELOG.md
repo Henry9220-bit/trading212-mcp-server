@@ -37,6 +37,13 @@ Added:
 - A startup error that names the misconfigured variables and prints no values.
 - README sections for read-only API keys, Claude Desktop and Claude Code.
 
+Changed:
+
+- Upgrade `filelock` from 4.0.7 to 4.2.10 and `opentelemetry-api` from 1.45.1
+  to 1.45.2 to clear the advisories reported by `pip-audit`. The minimum
+  `filelock` version is now 4.2.1. No dependency was added.
+- The security policy and package URLs point at this fork instead of upstream.
+
 Counts: 17 tools (was 28), 10 static resources (was 11), 4 resource templates
 (was 5), 1 prompt.
 

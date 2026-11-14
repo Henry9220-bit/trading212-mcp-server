@@ -135,6 +135,7 @@ updates for uv, actions, and Docker.
 
 ## Reporting issues
 
-Use GitHub issues for reproducible bugs with synthetic examples. Report security
-issues privately using [.github/SECURITY.md](.github/SECURITY.md); never include
-credentials or account data in public issues. Contributions use the MIT license.
+Do not report problems with this fork to the upstream project. Report security
+issues privately as described in [.github/SECURITY.md](.github/SECURITY.md);
+never include credentials or account data in any report. Use synthetic examples
+to reproduce bugs. Contributions use the MIT license.
