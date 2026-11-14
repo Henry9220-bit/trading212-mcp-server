@@ -1,53 +1,42 @@
 # Security Policy
 
+This repository is a personal, read-only fork of
+[RohanAnandPandit/trading212-mcp-server](https://github.com/RohanAnandPandit/trading212-mcp-server).
+It is maintained on a best-effort basis with no guaranteed response time.
+
 ## Supported Versions
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x / current main | :white_check_mark: |
-| <= 0.1.x | :x: |
+| 0.3.0+readonly (this fork's `main`) | :white_check_mark: |
+| Anything older | :x: |
 
 ## Reporting a Vulnerability
 
-We take security issues seriously and appreciate your efforts to responsibly disclose any vulnerabilities you find.
+**Do not report security problems in public, and do not include credentials or
+account data in any report.**
 
-**Please do not report security vulnerabilities through public GitHub issues.**
+- For a problem in this fork, contact the fork owner through
+  [their GitHub profile](https://github.com/Henry9220-bit). Issues and private
+  vulnerability reporting are not enabled on this repository.
+- Do not send reports about this fork to the upstream maintainer. Only if you
+  have confirmed the same problem in the upstream project, report it there
+  under upstream's own security policy.
 
-### How to Report
+A useful report includes a description of the problem, steps to reproduce it
+with synthetic data, and the impact you expect.
 
-If you discover a security vulnerability, please email me at [rohananandpandit@gmail.com](mailto:rohananandpandit@gmail.com). Include the following details:
-- A description of the vulnerability
-- Steps to reproduce the issue
-- Any potential impact
-- Your contact information (optional)
+## What matters most here
 
-### Our Commitment
+This server must never change a Trading 212 account or expose credentials. A
+way to make it send any request other than a `GET` to an allowlisted read
+endpoint, or to make a key or secret appear in output, logs or the cache, is a
+vulnerability.
 
-- We will acknowledge receipt of your report within 3 business days
-- We will confirm the vulnerability and keep you informed of the progress
-- We will notify you when the vulnerability has been fixed
-- We will credit you for your discovery (unless you prefer to remain anonymous)
+## Good practice for users
 
-### Response Times
-
-| Type of Report       | Response Time |
-|----------------------|---------------|
-| Critical Issue       | 24 hours     |
-| High Severity Issue  | 3 business days |
-| Medium/Low Severity | 7 business days |
-
-## Security Updates
-
-Security updates will be released as patches to the latest version. We recommend always running the latest version of the software.
-
-## Security Best Practices
-
-When using this software, we recommend:
-- Keeping your system and dependencies up to date
-- Following the principle of least privilege
-- Regularly reviewing access controls
-- Monitoring for any suspicious activities
-
-## Security Updates and Notifications
-
-To receive security updates, please watch this repository's releases.
+- Give the server an API key with read permissions only, restricted to your IP
+  addresses where possible.
+- Keep `.env` and the cache directory private. Cached responses contain account
+  data in plaintext.
+- Keep dependencies up to date with `uv sync --frozen` after pulling changes.

@@ -26,89 +26,6 @@
     ],
     "required": []
   },
-  "AccountBucketDetailedResponse": {
-    "fields": [
-      "creationDate",
-      "dividendCashAction",
-      "endDate",
-      "goal",
-      "icon",
-      "id",
-      "initialInvestment",
-      "instrumentShares",
-      "name",
-      "publicUrl"
-    ],
-    "required": []
-  },
-  "InstrumentIssue": {
-    "fields": [
-      "name",
-      "severity"
-    ],
-    "required": []
-  },
-  "InvestmentResult": {
-    "fields": [
-      "priceAvgInvestedValue",
-      "priceAvgResult",
-      "priceAvgResultCoef",
-      "priceAvgValue"
-    ],
-    "required": []
-  },
-  "AccountBucketInstrumentResult": {
-    "fields": [
-      "currentShare",
-      "expectedShare",
-      "issues",
-      "ownedQuantity",
-      "result",
-      "ticker"
-    ],
-    "required": []
-  },
-  "AccountBucketInstrumentsDetailedResponse": {
-    "fields": [
-      "instruments",
-      "settings"
-    ],
-    "required": []
-  },
-  "DividendDetails": {
-    "fields": [
-      "gained",
-      "inCash",
-      "reinvested"
-    ],
-    "required": []
-  },
-  "AccountBucketResultResponse": {
-    "fields": [
-      "cash",
-      "dividendDetails",
-      "id",
-      "progress",
-      "result",
-      "status"
-    ],
-    "required": []
-  },
-  "DuplicateBucketRequest": {
-    "fields": [
-      "icon",
-      "name"
-    ],
-    "required": []
-  },
-  "EnqueuedReportResponse": {
-    "fields": [
-      "reportId"
-    ],
-    "required": [
-      "reportId"
-    ]
-  },
   "TimeEvent": {
     "fields": [
       "date",
@@ -180,31 +97,6 @@
       "walletImpact"
     ],
     "required": []
-  },
-  "LimitRequest": {
-    "fields": [
-      "limitPrice",
-      "quantity",
-      "ticker",
-      "timeValidity"
-    ],
-    "required": [
-      "limitPrice",
-      "quantity",
-      "ticker",
-      "timeValidity"
-    ]
-  },
-  "MarketRequest": {
-    "fields": [
-      "extendedHours",
-      "quantity",
-      "ticker"
-    ],
-    "required": [
-      "quantity",
-      "ticker"
-    ]
   },
   "Order": {
     "fields": [
@@ -289,24 +181,6 @@
       "items"
     ]
   },
-  "PieRequest": {
-    "fields": [
-      "dividendCashAction",
-      "endDate",
-      "goal",
-      "icon",
-      "instrumentShares",
-      "name"
-    ],
-    "required": []
-  },
-  "PlaceOrderError": {
-    "fields": [
-      "clarification",
-      "code"
-    ],
-    "required": []
-  },
   "PositionWalletImpact": {
     "fields": [
       "currency",
@@ -347,14 +221,6 @@
     ],
     "required": []
   },
-  "PublicReportRequest": {
-    "fields": [
-      "dataIncluded",
-      "timeFrom",
-      "timeTo"
-    ],
-    "required": []
-  },
   "ReportResponse": {
     "fields": [
       "dataIncluded",
@@ -365,36 +231,6 @@
       "timeTo"
     ],
     "required": []
-  },
-  "StopLimitRequest": {
-    "fields": [
-      "limitPrice",
-      "quantity",
-      "stopPrice",
-      "ticker",
-      "timeValidity"
-    ],
-    "required": [
-      "limitPrice",
-      "quantity",
-      "stopPrice",
-      "ticker",
-      "timeValidity"
-    ]
-  },
-  "StopRequest": {
-    "fields": [
-      "quantity",
-      "stopPrice",
-      "ticker",
-      "timeValidity"
-    ],
-    "required": [
-      "quantity",
-      "stopPrice",
-      "ticker",
-      "timeValidity"
-    ]
   },
   "TradeableInstrument": {
     "fields": [

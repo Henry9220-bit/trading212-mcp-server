@@ -1,27 +1,8 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
 
-from pydantic import AfterValidator, Field
-
-from .base import ApiModel, RequestModel
+from .base import ApiModel
 from .metadata import Instrument
-
-
-def nonzero(value: float) -> float:
-    if value == 0:
-        raise ValueError("Quantity must not be zero")
-    return value
-
-
-Quantity = Annotated[float, Field(allow_inf_nan=False), AfterValidator(nonzero)]
-Ticker = Annotated[str, Field(min_length=1)]
-Price = Annotated[float, Field(gt=0, allow_inf_nan=False)]
-
-
-class LimitRequestTimeValidityEnum(StrEnum):
-    DAY = "DAY"
-    GOOD_TILL_CANCEL = "GOOD_TILL_CANCEL"
 
 
 class OrderStatusEnum(StrEnum):
@@ -65,32 +46,9 @@ class PositionInitiatedFromEnum(StrEnum):
     INSTRUMENT_AUTOINVEST = "INSTRUMENT_AUTOINVEST"
 
 
-class StopLimitRequestTimeValidityEnum(StrEnum):
-    DAY = "DAY"
-    GOOD_TILL_CANCEL = "GOOD_TILL_CANCEL"
-
-
-class StopRequestTimeValidityEnum(StrEnum):
-    DAY = "DAY"
-    GOOD_TILL_CANCEL = "GOOD_TILL_CANCEL"
-
-
 class TimeValidityEnum(StrEnum):
     DAY = "DAY"
     GOOD_TILL_CANCEL = "GOOD_TILL_CANCEL"
-
-
-class LimitRequest(RequestModel):
-    limitPrice: Price
-    quantity: Quantity
-    ticker: Ticker
-    timeValidity: LimitRequestTimeValidityEnum
-
-
-class MarketRequest(RequestModel):
-    extendedHours: bool = False
-    quantity: Quantity
-    ticker: Ticker
 
 
 class Order(ApiModel):
@@ -112,23 +70,3 @@ class Order(ApiModel):
     timeInForce: TimeValidityEnum | None = None
     type: OrderTypeEnum | None = None
     value: float | None = None
-
-
-class PlaceOrderError(ApiModel):
-    clarification: str | None = None
-    code: str | None = None
-
-
-class StopLimitRequest(RequestModel):
-    limitPrice: Price
-    quantity: Quantity
-    stopPrice: Price
-    ticker: Ticker
-    timeValidity: StopLimitRequestTimeValidityEnum
-
-
-class StopRequest(RequestModel):
-    quantity: Quantity
-    stopPrice: Price
-    ticker: Ticker
-    timeValidity: StopRequestTimeValidityEnum

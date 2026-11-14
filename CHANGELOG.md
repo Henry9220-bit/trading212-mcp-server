@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.3.0-readonly — Unreleased
+
+Read-only fork of RohanAnandPandit/trading212-mcp-server. The package version is
+`0.3.0+readonly`, the PEP 440 spelling of this entry.
+
+Removed:
+
+- Order tools `place_market_order`, `place_limit_order`, `place_stop_order`,
+  `place_stop_limit_order` and `cancel_order`, with their client methods and
+  request models.
+- `request_csv_export` and the client's export request. `fetch_exports_list`
+  remains.
+- The whole pies feature: six pie tools, the `trading212://pies` and
+  `trading212://pies/{pie_id}` resources, six client methods and the pie models.
+- The `sse` transport. `stdio` (default) and `streamable-http` on `127.0.0.1`
+  remain.
+- The `write` argument of `annotations()`; every tool is annotated read-only.
+- Mutation handling in the cache and retry code, which nothing can reach now.
+
+Added:
+
+- A read-only boundary in the client: `_make_request` accepts only `GET` and an
+  allowlist of ten read endpoints, checked before the cache and the network.
+  `_send` and an HTTP client hook re-check the method.
+- `fetch_open_lots`: rebuilds the buys still held, using FIFO over the paged
+  order history, and reconciles them with open positions. Mismatches are
+  reported as `reconciled: false`; lots are never adjusted to fit.
+- Paced multi-page history reads that respect the documented limit of 20
+  requests per minute.
+- `fetch_open_lots` reports `history_cached_at` and explains a mismatch that
+  may come from a trade made after the order history was cached.
+- Clear errors for a ticker Trading 212 does not recognise and for an order ID
+  with no pending order, instead of a bare HTTP 404.
+- The fee note now states what a read-only check of real fills showed:
+  `netValue` includes the currency conversion fee. Other charges remain
+  unconfirmed, and the API schema still documents none of this.
+- `tests/test_readonly.py`, `tests/test_lots.py` and
+  `tests/test_credentials.py`, including static checks that the source holds no
+  write method names and a single HTTP call site.
+- A startup error that names the misconfigured variables and prints no values.
+- README sections for read-only API keys, Claude Desktop and Claude Code.
+
+Changed:
+
+- Upgrade `filelock` from 4.0.7 to 4.2.10 and `opentelemetry-api` from 1.45.1
+  to 1.45.2 to clear the advisories reported by `pip-audit`. The minimum
+  `filelock` version is now 4.2.1. No dependency was added.
+- The security policy and package URLs point at this fork instead of upstream.
+
+Counts: 17 tools (was 28), 10 static resources (was 11), 4 resource templates
+(was 5), 1 prompt.
+
+Migration: MCP clients that relied on the removed tools must stop calling them.
+`TRANSPORT=sse` is now a configuration error; use `streamable-http`. The cache
+directory format is unchanged.
+
 ## 0.2.0 — Unreleased
 
 - Preserve tax charge dates and currencies; tolerate additional nested export response fields.

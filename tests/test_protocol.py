@@ -53,18 +53,15 @@ def api_response(req):
     elif path.endswith("/exchanges"):
         data = [{"id": 1, "name": "Test", "workingSchedules": []}]
     elif path.endswith("/exports"):
-        data = [] if req.method == "GET" else {"reportId": 1}
+        data = []
     elif "/history/" in path:
         data = {"items": [], "nextPagePath": None}
-    elif path.endswith(("/orders", "/pies")) and req.method == "GET":
+    elif path.endswith("/orders"):
         data = []
     else:
         data = {"id": 1}
-    return (
-        httpx.Response(204)
-        if req.method == "DELETE"
-        else httpx.Response(200, json=data)
-    )
+    assert req.method == "GET", "the read-only server sent a write"
+    return httpx.Response(200, json=data)
 
 
 def test_full_protocol_surface_and_lifecycle(settings):
@@ -82,16 +79,7 @@ def test_full_protocol_surface_and_lifecycle(settings):
         async with Client(server) as session:
             tools = (await session.list_tools()).tools
             assert {t.name for t in tools} == {t["name"] for t in BASELINE["tools"]}
-            values = {
-                "ticker": "AAPL_US_EQ",
-                "quantity": -1,
-                "limit_price": 10,
-                "stop_price": 10,
-                "pie_id": 1,
-                "order_id": 1,
-                "name": "Test",
-                "instrument_shares": {"AAPL_US_EQ": 1},
-            }
+            values = {"ticker": "AAPL_US_EQ", "order_id": 1}
             for tool in tools:
                 args = {
                     key: values[key] for key in tool.input_schema.get("required", [])
@@ -99,7 +87,8 @@ def test_full_protocol_surface_and_lifecycle(settings):
                 result = await session.call_tool(tool.name, args)
                 assert not result.is_error, (tool.name, result)
                 assert META_KEY in result.meta
-                assert tool.annotations is not None
+                assert tool.annotations.read_only_hint is True
+                assert tool.annotations.destructive_hint is False
                 baseline = next(t for t in BASELINE["tools"] if t["name"] == tool.name)
                 required = set(baseline["inputSchema"].get("required", []))
                 assert set(tool.input_schema.get("required", [])) == required
@@ -118,10 +107,8 @@ def test_full_protocol_surface_and_lifecycle(settings):
                 r["uriTemplate"] for r in BASELINE["templates"]
             }
             for template in templates:
-                uri = (
-                    template.uri_template.replace("{ticker}", "AAPL_US_EQ")
-                    .replace("{order_id}", "1")
-                    .replace("{pie_id}", "1")
+                uri = template.uri_template.replace("{ticker}", "AAPL_US_EQ").replace(
+                    "{order_id}", "1"
                 )
                 result = await session.read_resource(uri)
                 assert result.contents
@@ -131,13 +118,62 @@ def test_full_protocol_surface_and_lifecycle(settings):
             second = await session.call_tool("fetch_account_summary", {})
             assert first.structured_content == second.structured_content
             assert second.meta[META_KEY][0]["cacheHit"] is True
-            invalid = await session.call_tool(
-                "place_market_order", {"ticker": "AAPL_US_EQ", "quantity": 0}
-            )
-            assert invalid.is_error
 
     asyncio.run(run())
     assert clients[0].http.is_closed and clients[0].cache.closed
+
+
+REMOVED_TOOLS = {
+    "place_market_order": {"ticker": "AAPL_US_EQ", "quantity": 1},
+    "place_limit_order": {"ticker": "AAPL_US_EQ", "quantity": 1, "limit_price": 10},
+    "place_stop_order": {"ticker": "AAPL_US_EQ", "quantity": 1, "stop_price": 10},
+    "place_stop_limit_order": {
+        "ticker": "AAPL_US_EQ",
+        "quantity": 1,
+        "stop_price": 10,
+        "limit_price": 9,
+    },
+    "cancel_order": {"order_id": 1},
+    "request_csv_export": {},
+    "fetch_pies": {},
+    "fetch_a_pie": {"pie_id": 1},
+    "create_pie": {"name": "Test", "instrument_shares": {"AAPL_US_EQ": 1}},
+    "update_pie": {"pie_id": 1},
+    "duplicate_pie": {"pie_id": 1},
+    "delete_pie": {"pie_id": 1},
+}
+
+
+def test_removed_write_and_pie_tools_are_rejected_without_requests(settings):
+    calls = []
+
+    def factory(settings):
+        return Trading212Client(
+            settings,
+            transport=httpx.MockTransport(
+                lambda req: calls.append(req) or httpx.Response(200, json={})
+            ),
+        )
+
+    async def run():
+        async with Client(create_server(settings, factory)) as session:
+            for name, arguments in REMOVED_TOOLS.items():
+                try:
+                    result = await session.call_tool(name, arguments)
+                except Exception as exc:  # noqa: BLE001 - any refusal is acceptable
+                    assert name in str(exc) or "nknown" in str(exc), (name, exc)
+                else:
+                    assert result.is_error, name
+            for uri in ("trading212://pies", "trading212://pies/1"):
+                try:
+                    result = await session.read_resource(uri)
+                except Exception:  # noqa: BLE001, S110 - refusal is the expected outcome
+                    pass
+                else:
+                    raise AssertionError(f"{uri} is still readable: {result}")
+
+    asyncio.run(run())
+    assert calls == []
 
 
 def test_prompt_failure_has_no_stdout_or_private_errors(settings, capsys):

@@ -1,10 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Self
 
-from pydantic import model_validator
-
-from .base import ApiModel, RequestModel
+from .base import ApiModel
 from .metadata import Instrument
 from .orders import Order
 
@@ -25,10 +22,6 @@ class ReportResponseStatusEnum(StrEnum):
     Canceled = "Canceled"
     Failed = "Failed"
     Finished = "Finished"
-
-
-class EnqueuedReportResponse(ApiModel):
-    reportId: int
 
 
 class Tax(ApiModel):
@@ -100,37 +93,15 @@ class PaginatedResponseHistoryTransactionItem(ApiModel):
     nextPagePath: str | None = None
 
 
-class ReportDataIncluded(RequestModel):
+class ReportDataIncluded(ApiModel):
     includeDividends: bool | None = True
     includeInterest: bool | None = True
     includeOrders: bool | None = True
     includeTransactions: bool | None = True
-
-
-class ReportDataIncludedResponse(ApiModel):
-    includeDividends: bool | None = True
-    includeInterest: bool | None = True
-    includeOrders: bool | None = True
-    includeTransactions: bool | None = True
-
-
-class PublicReportRequest(RequestModel):
-    dataIncluded: ReportDataIncluded | None = None
-    timeFrom: datetime | None = None
-    timeTo: datetime | None = None
-
-    @model_validator(mode="after")
-    def ordered_dates(self) -> Self:
-        for value in (self.timeFrom, self.timeTo):
-            if value is not None and value.tzinfo is None:
-                raise ValueError("Export dates must include a timezone")
-        if self.timeFrom and self.timeTo and self.timeFrom > self.timeTo:
-            raise ValueError("Export start must precede end")
-        return self
 
 
 class ReportResponse(ApiModel):
-    dataIncluded: ReportDataIncludedResponse | None = None
+    dataIncluded: ReportDataIncluded | None = None
     downloadLink: str | None = None
     reportId: int | None = None
     status: ReportResponseStatusEnum | None = None

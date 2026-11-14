@@ -1,4 +1,4 @@
-"""Server factory and CLI. Importing never opens an account client."""
+"""Read-only server factory and CLI. Importing never opens an account client."""
 
 import logging
 from collections.abc import AsyncIterator, Callable, Iterable
@@ -15,7 +15,7 @@ from pydantic import AnyUrl, ValidationError
 from . import __version__, prompts, resources, tools
 from .cache import META_KEY, observations
 from .client import Trading212Client
-from .settings import Settings
+from .settings import ENV_VARS, Settings
 
 
 class TradingServer(MCPServer[Trading212Client]):
@@ -73,8 +73,8 @@ def create_server(
         server: MCPServer[Trading212Client],
     ) -> AsyncIterator[Trading212Client]:
         nonlocal active, active_lifespans
-        # SSE opens a lifespan per connection. Keep the shared client alive until
-        # the last connection exits; streamable HTTP uses one application lifespan.
+        # Overlapping sessions may each open a lifespan. Keep the shared client
+        # alive until the last one exits; streamable HTTP uses one lifespan.
         if active is None:
             active = client_factory(
                 settings if settings is not None else Settings.from_env()
@@ -104,16 +104,23 @@ def main() -> None:
         logging.getLogger(name).setLevel(logging.CRITICAL)
     try:
         settings = Settings.from_env()
-    except ValidationError:
+    except ValidationError as exc:
+        # Name the variables to fix; never echo their values.
+        names = sorted(
+            {ENV_VARS.get(str(error["loc"][0]), "settings") for error in exc.errors()}
+        )
         raise SystemExit(
-            "Invalid configuration. Check API credentials, ENVIRONMENT, TRANSPORT and cache settings."
+            "Invalid configuration: check "
+            + ", ".join(names)
+            + ". Set TRADING212_API_KEY (and TRADING212_API_SECRET) in the "
+            "environment or in a .env file in the working directory."
         ) from None
     server = create_server(settings)
     if settings.transport == "stdio":
         server.run(transport="stdio")
     else:
         server.run(
-            transport=settings.transport,
+            transport="streamable-http",
             host="127.0.0.1",
             port=8000,
             transport_security=TransportSecuritySettings(

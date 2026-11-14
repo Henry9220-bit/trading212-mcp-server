@@ -1,5 +1,9 @@
 # Modernization review and validation
 
+> This report describes upstream version 0.2.0, before this fork became
+> read-only. Its tool counts and its statements about mutations no longer
+> apply; see the README and CHANGELOG for version 0.3.0-readonly.
+
 Reviewed on 2026-09-04. Version 0.2.0 is prepared in the source tree; no package
 publication, deployment, or live Trading 212 calls form part of this work.
 

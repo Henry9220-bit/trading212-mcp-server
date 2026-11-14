@@ -62,11 +62,11 @@ def main():
                     },
                 )
             ) as client:
-                assert len((await client.list_tools()).tools) == 28
-                assert len((await client.list_resources()).resources) == 11
+                assert len((await client.list_tools()).tools) == 17
+                assert len((await client.list_resources()).resources) == 10
                 assert (
                     len((await client.list_resource_templates()).resource_templates)
-                    == 5
+                    == 4
                 )
                 assert len((await client.list_prompts()).prompts) == 1
 

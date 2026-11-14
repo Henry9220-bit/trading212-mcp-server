@@ -22,11 +22,12 @@ snapshot does not establish current upstream compatibility.
 3. Reconcile every relevant change across endpoint paths and methods,
    authentication, parameters, defaults and limits, request bodies, response
    fields, enums, pagination, deprecations, tests, and user documentation.
-4. Keep request validation strong where it reflects documented or necessary
-   trading safety, but do not invent format restrictions such as undocumented
-   ticker character sets. Response models must tolerate additive fields, and
-   changed upstream enums require explicit review so a new value cannot reject
-   an otherwise valid response unnoticed.
+4. This fork is read-only: reconcile only the GET endpoints on the client's
+   allowlist, and do not add models, methods or tools for write or pie
+   endpoints. Do not invent format restrictions such as undocumented ticker
+   character sets. Response models must tolerate additive fields, and changed
+   upstream enums require explicit review so a new value cannot reject an
+   otherwise valid response unnoticed.
 5. Preserve existing MCP names and compatibility aliases unless a deliberate
    breaking change is requested and documented.
 6. Run Ruff, formatting, strict mypy, the full pytest suite, package build and

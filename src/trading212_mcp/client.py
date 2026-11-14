@@ -1,13 +1,20 @@
-"""Trading 212 API client: one validated HTTP boundary for all endpoints."""
+"""Trading 212 API client: one validated, read-only HTTP boundary.
+
+This module is the server's security boundary. Every request goes through
+``Trading212Client._make_request``, which admits only the HTTP GET method and an
+explicit allowlist of read endpoints before the cache or the network is
+touched. ``_send`` and an HTTPX request hook check the method again as defense
+in depth. MCP tool annotations describe this behaviour; they do not enforce it.
+"""
 
 import base64
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from email.utils import parsedate_to_datetime
-from typing import Any, TypeVar
-from urllib.parse import unquote, urlsplit
+from typing import Any, NamedTuple, TypeVar
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
 from hishel import Headers, Request, Response
@@ -17,36 +24,70 @@ from .cache import ResponseCache
 from .errors import (
     AuthenticationError,
     InvalidResponseError,
+    NotFoundError,
     RateLimitError,
     RequestError,
     UpstreamError,
 )
 from .models import (
-    AccountBucketInstrumentsDetailedResponse,
-    AccountBucketResultResponse,
     AccountSummary,
     Cash,
-    DuplicateBucketRequest,
-    EnqueuedReportResponse,
     Exchange,
-    LimitRequest,
-    MarketRequest,
+    HistoricalOrder,
     Order,
     PaginatedResponseHistoricalOrder,
     PaginatedResponseHistoryDividendItem,
     PaginatedResponseHistoryTransactionItem,
-    PieRequest,
     Position,
-    PublicReportRequest,
-    ReportDataIncluded,
     ReportResponse,
-    StopLimitRequest,
-    StopRequest,
     TradeableInstrument,
 )
 from .settings import Settings
 
 T = TypeVar("T")
+
+READ_ONLY_ERROR = "Read-only server: only GET is allowed."
+NOT_ALLOWED_ERROR = "Read-only server: this endpoint is not on the allowlist."
+# Trading 212 answers a position lookup for a ticker it does not know with
+# HTTP 404, while a known ticker that is simply not held returns an empty list.
+UNKNOWN_TICKER_ERROR = (
+    "Trading 212 does not recognise that ticker. Use the full instrument "
+    "ticker, for example AAPL_US_EQ; search_instrument can look it up."
+)
+UNKNOWN_ORDER_ERROR = "No pending order was found with that ID."
+
+# Paths, relative to /api/<version>, that this server may request. Everything
+# else is refused, including every order-placement, pie and export-request
+# endpoint. Order IDs are positive int64 values, hence at most 19 digits.
+ALLOWED_PATHS: tuple[str, ...] = (
+    r"/equity/account/summary",
+    r"/equity/positions",
+    r"/equity/orders",
+    r"/equity/orders/[1-9][0-9]{0,18}",
+    r"/equity/history/orders",
+    r"/equity/history/dividends",
+    r"/equity/history/transactions",
+    r"/equity/history/exports",
+    r"/equity/metadata/instruments",
+    r"/equity/metadata/exchanges",
+)
+
+HISTORY_ORDERS_PATH = "/equity/history/orders"
+# docs/api.json documents "Rate limit: 20 req / 1m0s" for GET
+# /equity/history/orders; tests/test_lots.py checks this pair against the
+# snapshot. Multi-page reads wait period / requests between network requests
+# instead of relying on HTTP 429 responses.
+HISTORY_ORDERS_RATE_LIMIT: tuple[int, float] = (20, 60.0)
+HISTORY_PAGE_SIZE = 50
+MAX_HISTORY_PAGES = 200
+
+
+class OrderHistory(NamedTuple):
+    """Historical orders gathered across pages, newest page first."""
+
+    items: list[HistoricalOrder]
+    pages: int
+    truncated: bool
 
 
 def parse_response(schema: type[T], data: Any) -> T:
@@ -56,6 +97,12 @@ def parse_response(schema: type[T], data: Any) -> T:
         raise InvalidResponseError(
             "Trading 212 returned an unexpected response format."
         ) from None
+
+
+def _reject_writes(request: httpx.Request) -> None:
+    """HTTPX request hook: nothing but GET may leave the HTTP client."""
+    if request.method != "GET":
+        raise RequestError(READ_ONLY_ERROR)
 
 
 class Trading212Client:
@@ -81,17 +128,17 @@ class Trading212Client:
         )
         self.cache = ResponseCache(settings, self.base_url, authorization)
         self.http = httpx.Client(
-            headers={
-                "Authorization": authorization,
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": authorization},
             timeout=httpx.Timeout(10, connect=5),
             follow_redirects=False,
             transport=transport,
             trust_env=False,
+            event_hooks={"request": [_reject_writes]},
         )
         self._sleep = sleep
         self._monotonic = monotonic
+        # Completion time of the latest network request per endpoint URL.
+        self._last_sent: dict[str, float] = {}
 
     def close(self) -> None:
         try:
@@ -148,7 +195,11 @@ class Trading212Client:
                 pass
         return float(2**attempt)
 
-    def _send(self, request: Request, payload: Any) -> Response:
+    def _send(self, request: Request) -> Response:
+        # Second line of defense: _make_request has already refused other methods.
+        if request.method != "GET":
+            raise RequestError(READ_ONLY_ERROR)
+        endpoint = request.url.split("?", 1)[0]
         deadline = self._monotonic() + 30
         for attempt in range(3):
             remaining = deadline - self._monotonic()
@@ -157,19 +208,19 @@ class Trading212Client:
             try:
                 # Cookies are unnecessary for API-key authentication.
                 self.http.cookies.clear()
-                response = self.http.request(
-                    request.method,
-                    request.url,
-                    json=payload,
-                    timeout=httpx.Timeout(
-                        min(10, remaining), connect=min(5, remaining)
-                    ),
-                )
+                try:
+                    response = self.http.request(
+                        "GET",
+                        request.url,
+                        timeout=httpx.Timeout(
+                            min(10, remaining), connect=min(5, remaining)
+                        ),
+                    )
+                finally:
+                    self._last_sent[endpoint] = self._monotonic()
             except httpx.TransportError:
-                if request.method != "GET" or attempt == 2:
-                    raise UpstreamError(
-                        "Trading 212 connection failed; a mutation's outcome may be unknown. Do not retry it automatically."
-                    ) from None
+                if attempt == 2:
+                    raise UpstreamError("Trading 212 connection failed.") from None
                 delay = float(2**attempt)
             else:
                 status = response.status_code
@@ -177,6 +228,8 @@ class Trading212Client:
                     raise AuthenticationError(
                         "Trading 212 authentication or permission denied."
                     )
+                if status == 404:
+                    raise NotFoundError("Trading 212 request failed (HTTP 404).")
                 if 200 <= status < 300:
                     body = response.content
                     if body:
@@ -196,11 +249,7 @@ class Trading212Client:
                         ),
                         stream=iter([body]),
                     )
-                if (
-                    status not in (429, 500, 502, 503, 504)
-                    or request.method != "GET"
-                    or attempt == 2
-                ):
+                if status not in (429, 500, 502, 503, 504) or attempt == 2:
                     if status == 429:
                         raise RateLimitError(
                             "Trading 212 rate limit reached; retry later."
@@ -214,17 +263,32 @@ class Trading212Client:
             self._sleep(delay)
         raise UpstreamError("Trading 212 request failed.")
 
-    def _make_request(self, method: str, url: str, **kwargs: Any) -> Any:
+    def _make_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: Mapping[str, int | str] | None = None,
+        response_schema: Any = None,
+    ) -> Any:
+        """Send one allowlisted GET request; the only path to the network.
+
+        Refusals happen before the cache layer runs, so a rejected request
+        makes no network call and leaves cached data untouched.
+        """
+        if method != "GET":
+            raise RequestError(READ_ONLY_ERROR)
         path = self._normalise_path(url)
+        endpoint = urlsplit(path).path
+        if not any(re.fullmatch(allowed, endpoint) for allowed in ALLOWED_PATHS):
+            raise RequestError(NOT_ALLOWED_ERROR)
         target = httpx.URL(self.base_url + path)
-        params = kwargs.get("params")
         if params:
             target = target.copy_merge_params(params)
-        schema = kwargs.get("response_schema")
+        schema = response_schema
         body = self.cache.request(
-            method,
             str(target),
-            lambda request: self._send(request, kwargs.get("json")),
+            self._send,
             validate=(
                 lambda body: parse_response(schema, json.loads(body) if body else None)
             )
@@ -232,6 +296,18 @@ class Trading212Client:
             else None,
         )
         return json.loads(body) if body else None
+
+    def _pace(self, path: str, interval: float) -> None:
+        """Keep network requests to one endpoint at least ``interval`` apart.
+
+        Cached pages never reach ``_send``, so they do not start a new wait.
+        """
+        last = self._last_sent.get(self.base_url + path)
+        if last is None:
+            return
+        wait = interval - (self._monotonic() - last)
+        if wait > 0:
+            self._sleep(wait)
 
     def get_account_summary(self) -> AccountSummary:
         """Fetch the account summary."""
@@ -257,9 +333,17 @@ class Trading212Client:
     def get_positions(self, ticker: str | None = None) -> list[Position]:
         """Fetch positions, optionally filtered by ticker."""
         params = {"ticker": ticker} if ticker else None
-        data = self._make_request(
-            "GET", "/equity/positions", params=params, response_schema=list[Position]
-        )
+        try:
+            data = self._make_request(
+                "GET",
+                "/equity/positions",
+                params=params,
+                response_schema=list[Position],
+            )
+        except NotFoundError:
+            if ticker:
+                raise RequestError(UNKNOWN_TICKER_ERROR) from None
+            raise
         return parse_response(list[Position], data)
 
     def get_position_by_ticker(self, ticker: str) -> Position:
@@ -285,7 +369,7 @@ class Trading212Client:
         ticker: str | None = None,
         time_from: str | None = None,
     ) -> dict[str, int | str]:
-        params: dict[str, int | str] = {"limit": min(50, max(1, limit))}
+        params: dict[str, int | str] = {"limit": min(HISTORY_PAGE_SIZE, max(1, limit))}
         if cursor is not None:
             params["cursor"] = cursor
         if ticker is not None:
@@ -317,69 +401,14 @@ class Trading212Client:
         return parse_response(list[Order], data)
 
     def get_order_by_id(self, order_id: int) -> Order:
-        """Fetch a specific order by ID."""
-        data = self._make_request(
-            "GET", f"/equity/orders/{order_id}", response_schema=Order
-        )
+        """Fetch a specific pending order by ID."""
+        try:
+            data = self._make_request(
+                "GET", f"/equity/orders/{order_id}", response_schema=Order
+            )
+        except NotFoundError:
+            raise RequestError(UNKNOWN_ORDER_ERROR) from None
         return parse_response(Order, data)
-
-    def get_pies(self) -> list[AccountBucketResultResponse]:
-        """Fetch all pies."""
-        data = self._make_request(
-            "GET", "/equity/pies", response_schema=list[AccountBucketResultResponse]
-        )
-        return parse_response(list[AccountBucketResultResponse], data)
-
-    def get_pie_by_id(self, pie_id: int) -> AccountBucketInstrumentsDetailedResponse:
-        """Fetch a specific pie by ID."""
-        data = self._make_request(
-            "GET",
-            f"/equity/pies/{pie_id}",
-            response_schema=AccountBucketInstrumentsDetailedResponse,
-        )
-        return parse_response(AccountBucketInstrumentsDetailedResponse, data)
-
-    def create_pie(
-        self, pie_data: PieRequest
-    ) -> AccountBucketInstrumentsDetailedResponse:
-        """Create a new pie."""
-        data = self._make_request(
-            "POST",
-            "/equity/pies",
-            json=pie_data.model_dump(mode="json", exclude_none=True),
-            response_schema=AccountBucketInstrumentsDetailedResponse,
-        )
-        return parse_response(AccountBucketInstrumentsDetailedResponse, data)
-
-    def update_pie(
-        self, pie_id: int, pie_data: PieRequest
-    ) -> AccountBucketInstrumentsDetailedResponse:
-        """Update a specific pie by ID."""
-        data = self._make_request(
-            "POST",
-            f"/equity/pies/{pie_id}",
-            json=pie_data.model_dump(mode="json", exclude_none=True),
-            response_schema=AccountBucketInstrumentsDetailedResponse,
-        )
-        return parse_response(AccountBucketInstrumentsDetailedResponse, data)
-
-    def duplicate_pie(
-        self,
-        pie_id: int,
-        duplicate_bucket_request: DuplicateBucketRequest,
-    ) -> AccountBucketInstrumentsDetailedResponse:
-        """Duplicate a pie."""
-        data = self._make_request(
-            "POST",
-            f"/equity/pies/{pie_id}/duplicate",
-            json=duplicate_bucket_request.model_dump(mode="json", exclude_none=True),
-            response_schema=AccountBucketInstrumentsDetailedResponse,
-        )
-        return parse_response(AccountBucketInstrumentsDetailedResponse, data)
-
-    def delete_pie(self, pie_id: int) -> None:
-        """Delete a pie."""
-        self._make_request("DELETE", f"/equity/pies/{pie_id}")
 
     def get_historical_order_data(
         self,
@@ -392,11 +421,55 @@ class Trading212Client:
 
         data = self._make_request(
             "GET",
-            "/equity/history/orders",
+            HISTORY_ORDERS_PATH,
             params=params,
             response_schema=PaginatedResponseHistoricalOrder,
         )
         return parse_response(PaginatedResponseHistoricalOrder, data)
+
+    @staticmethod
+    def _next_cursor(next_page_path: str) -> int:
+        values = parse_qs(urlsplit(next_page_path).query).get("cursor", [])
+        try:
+            return int(values[0])
+        except (IndexError, ValueError):
+            raise InvalidResponseError(
+                "Trading 212 returned an unexpected pagination path."
+            ) from None
+
+    def get_order_history(
+        self, ticker: str | None = None, max_pages: int = 40
+    ) -> OrderHistory:
+        """Follow ``nextPagePath`` cursors through historical orders.
+
+        Stops when the API reports no further page or after ``max_pages``
+        pages (clamped to 1-200), in which case ``truncated`` is true. Pages
+        use the normal cache, retry and validation path, and network requests
+        are spaced to the documented rate limit using the injectable sleep.
+        """
+        max_pages = min(MAX_HISTORY_PAGES, max(1, max_pages))
+        requests, period = HISTORY_ORDERS_RATE_LIMIT
+        interval = period / requests
+        items: list[HistoricalOrder] = []
+        cursor: int | None = None
+        pages = 0
+        while True:
+            self._pace(HISTORY_ORDERS_PATH, interval)
+            page = self.get_historical_order_data(
+                cursor=cursor, ticker=ticker, limit=HISTORY_PAGE_SIZE
+            )
+            pages += 1
+            items.extend(page.items)
+            if not page.nextPagePath:
+                return OrderHistory(items, pages, truncated=False)
+            if pages >= max_pages:
+                return OrderHistory(items, pages, truncated=True)
+            following = self._next_cursor(page.nextPagePath)
+            if following == cursor:
+                raise InvalidResponseError(
+                    "Trading 212 returned a repeated pagination cursor."
+                )
+            cursor = following
 
     def get_history_transactions(
         self,
@@ -431,84 +504,9 @@ class Trading212Client:
         )
         return parse_response(list[Exchange], data)
 
-    def place_market_order(self, order_data: MarketRequest) -> Order:
-        """Place a market order."""
-        data = self._make_request(
-            "POST",
-            "/equity/orders/market",
-            json=order_data.model_dump(mode="json", exclude_none=True),
-            response_schema=Order,
-        )
-        return parse_response(Order, data)
-
-    def place_limit_order(self, order_data: LimitRequest) -> Order:
-        """Place a limit order."""
-        data = self._make_request(
-            "POST",
-            "/equity/orders/limit",
-            json=order_data.model_dump(mode="json", exclude_none=True),
-            response_schema=Order,
-        )
-        return parse_response(Order, data)
-
-    def place_stop_order(self, order_data: StopRequest) -> Order:
-        """Place a stop order."""
-        data = self._make_request(
-            "POST",
-            "/equity/orders/stop",
-            json=order_data.model_dump(mode="json", exclude_none=True),
-            response_schema=Order,
-        )
-        return parse_response(Order, data)
-
-    def place_stop_limit_order(self, order_data: StopLimitRequest) -> Order:
-        """Place a stop-limit order."""
-        data = self._make_request(
-            "POST",
-            "/equity/orders/stop_limit",
-            json=order_data.model_dump(mode="json", exclude_none=True),
-            response_schema=Order,
-        )
-        return parse_response(Order, data)
-
-    def cancel_order(self, order_id: int) -> None:
-        """Cancel an existing order."""
-        self._make_request("DELETE", f"/equity/orders/{order_id}")
-
     def get_reports(self) -> list[ReportResponse]:
-        """Get account export reports."""
+        """List existing account export reports. This never requests a new one."""
         data = self._make_request(
             "GET", "/equity/history/exports", response_schema=list[ReportResponse]
         )
         return parse_response(list[ReportResponse], data)
-
-    def request_export(
-        self,
-        data_included: ReportDataIncluded | None = None,
-        time_from: str | None = None,
-        time_to: str | None = None,
-    ) -> EnqueuedReportResponse:
-        """Request a CSV export of the account history."""
-        validated = PublicReportRequest.model_validate(
-            {
-                "dataIncluded": data_included or ReportDataIncluded(),
-                "timeFrom": time_from,
-                "timeTo": time_to,
-            }
-        )
-        data_included = validated.dataIncluded or ReportDataIncluded()
-        payload: dict[str, Any] = {
-            "dataIncluded": data_included.model_dump(mode="json", exclude_none=True),
-        }
-        if time_from:
-            payload["timeFrom"] = time_from
-        if time_to:
-            payload["timeTo"] = time_to
-
-        data = self._make_request(
-            "POST",
-            "/equity/history/exports",
-            json=payload,
-            response_schema=EnqueuedReportResponse,
-        )
-        return parse_response(EnqueuedReportResponse, data)

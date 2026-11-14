@@ -8,7 +8,7 @@ from ..registration import annotations, safe_handler
 
 
 def register(mcp: MCPServer, get_client: Callable[[], Trading212Client]) -> None:
-    @mcp.tool("search_instrument", annotations=annotations(write=False))
+    @mcp.tool("search_instrument", annotations=annotations())
     @safe_handler
     def search_instrument(search_term: str | None = None) -> list[TradeableInstrument]:
         """
@@ -35,7 +35,7 @@ def register(mcp: MCPServer, get_client: Callable[[], Trading212Client]) -> None
             or (inst.name and search_lower in inst.name.lower())
         ]
 
-    @mcp.tool("search_exchange", annotations=annotations(write=False))
+    @mcp.tool("search_exchange", annotations=annotations())
     @safe_handler
     def search_exchange(search_term: str | None = None) -> list[Exchange]:
         """
