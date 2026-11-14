@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from mcp.server import MCPServer
 
+from ..cache import observations
 from ..client import MAX_HISTORY_PAGES, Trading212Client
 from ..lots import OpenLotsReport, build_open_lots
 from ..registration import annotations, safe_handler
@@ -41,7 +42,16 @@ def register(mcp: MCPServer, get_client: Callable[[], Trading212Client]) -> None
         pages = min(MAX_HISTORY_PAGES, max(1, max_pages))
         # Positions first: a missing permission fails before the slow part.
         positions = client.get_positions(ticker)
+        # Positions are cached for seconds, history for minutes. Note which
+        # history pages were cache hits so a stale history can be reported.
+        events = observations.get()
+        seen = len(events) if events is not None else 0
         history = client.get_order_history(ticker=ticker, max_pages=pages)
+        cached = [
+            datetime.fromisoformat(str(event["retrievedAt"]))
+            for event in (events or [])[seen:]
+            if event["cacheHit"]
+        ]
         return build_open_lots(
             history.items,
             positions,
@@ -49,4 +59,5 @@ def register(mcp: MCPServer, get_client: Callable[[], Trading212Client]) -> None
             truncated=history.truncated,
             pages_fetched=history.pages,
             max_pages=pages,
+            history_cached_at=min(cached, default=None),
         )

@@ -354,6 +354,43 @@ def test_incomplete_and_odd_records_are_skipped_and_counted():
     assert "1 FILLED record(s) had no ticker and were skipped." in result.notes
 
 
+def test_cached_history_is_named_as_the_cause_of_a_mismatch():
+    history = [
+        HistoricalOrder.model_validate(
+            record(AAPL, "BUY", 1, "2026-01-01T10:00:00Z", 1)
+        ),
+        HistoricalOrder.model_validate(
+            record(VOD, "BUY", 5, "2026-01-02T10:00:00Z", 2, currency="GBX")
+        ),
+    ]
+    positions = [
+        Position.model_validate(position(AAPL, 2)),
+        Position.model_validate(position(VOD, 5, "GBX")),
+    ]
+    options = {"now": NOW, "truncated": False, "pages_fetched": 1, "max_pages": 40}
+    fresh = build_open_lots(history, positions, **options)
+    stale = build_open_lots(
+        history,
+        positions,
+        history_cached_at=datetime(2026, 1, 31, 11, 58),
+        **options,
+    )
+    assert fresh.history_cached_at is None
+    assert not any("cache" in note for note in fresh.notes)
+    assert not any("cache" in note for note in fresh.summaries[0].notes)
+    assert stale.lots == fresh.lots
+    assert stale.history_cached_at == datetime(2026, 1, 31, 11, 58, tzinfo=UTC)
+    assert any("retrieved at 2026-01-31T11:58:00Z" in note for note in stale.notes)
+    mismatched, matched = stale.summaries
+    assert mismatched.reconciled is False
+    assert any(
+        "came from the cache, retrieved at 2026-01-31T11:58:00Z" in note
+        for note in mismatched.notes
+    )
+    # A ticker that reconciles needs no explanation.
+    assert matched.reconciled is True and matched.notes == []
+
+
 def test_holding_days_never_negative_and_accepts_naive_now():
     result = build_open_lots(
         [
@@ -571,6 +608,45 @@ def test_tool_truncates_and_reports_instead_of_balancing(settings):
     assert summary["reconciled"] is False and summary["difference"] == -4.0
     assert "truncated: true" in summary["notes"]
     assert all("ticker" not in req.url.params for req in calls)
+
+
+def test_tool_reports_a_trade_made_after_the_history_was_cached(settings):
+    """Positions refresh in seconds, history in minutes: say so, do not guess."""
+    held = {"quantity": 8}
+    calls = []
+
+    def respond(req):
+        calls.append(req)
+        if req.url.path.endswith("/positions"):
+            return httpx.Response(200, json=[position(AAPL, held["quantity"])])
+        items, following = PAGES[req.url.params.get("cursor")]
+        return httpx.Response(200, json={"items": items, "nextPagePath": following})
+
+    def factory(settings):
+        return Trading212Client(
+            settings, transport=httpx.MockTransport(respond), sleep=lambda _: None
+        )
+
+    async def run():
+        # Positions are never cached here; history keeps its five-minute TTL.
+        config = settings.model_copy(update={"account_ttl": 0})
+        async with Client(create_server(config, factory)) as session:
+            first = await session.call_tool("fetch_open_lots", {})
+            held["quantity"] = 9  # a buy lands after the history was cached
+            second = await session.call_tool("fetch_open_lots", {})
+            return first.structured_content, second.structured_content
+
+    first, second = asyncio.run(run())
+    assert first["history_cached_at"] is None
+    assert first["summaries"][0]["reconciled"] is True
+    assert not any("cache" in note for note in first["notes"])
+    assert len(history_calls(calls)) == 3  # the second call reused all three pages
+    assert second["history_cached_at"] is not None
+    assert second["lots"] == first["lots"]
+    (summary,) = second["summaries"]
+    assert summary["reconciled"] is False and summary["difference"] == -1.0
+    assert any("came from the cache" in note for note in summary["notes"])
+    assert any("served from the cache" in note for note in second["notes"])
 
 
 def test_tool_clamps_max_pages_and_treats_blank_ticker_as_all(settings):

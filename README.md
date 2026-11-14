@@ -284,7 +284,8 @@ tool's convention for analysis. It is not a broker statement or a tax record.
 `position_quantity` (from the positions endpoint), `difference` (lots minus
 position), `reconciled` (true when the difference is at most 0.000001 shares),
 `weighted_avg_price_native`, `oldest_lot_at`, `newest_lot_at`, and `notes`.
-The report also has `truncated`, `pages_fetched`, `max_pages` and `notes`.
+The report also has `truncated`, `pages_fetched`, `max_pages`,
+`history_cached_at` and `notes`.
 
 **Currencies.** `price_native` and `cost_native` are in the instrument
 currency. For London-listed shares that is often `GBX`, which is pence: 100 GBX
@@ -303,6 +304,13 @@ three seconds between pages rather than running into the limit, so an uncached
 40-page history takes about two minutes and 200 pages about ten. Pages are
 cached for `TRADING212_HISTORY_TTL` seconds, so a repeat call is fast. Use
 `ticker` to keep it short.
+
+**Recent trades.** Positions are cached for 15 seconds and order history for
+300, so right after a trade the position can be ahead of the history and the
+ticker shows `reconciled: false`. When any history page came from the cache,
+the report sets `history_cached_at` to the time it was retrieved and the notes
+say so. Call again after the history cache has expired, or set
+`TRADING212_HISTORY_TTL=0` to always read fresh history.
 
 **Known limitations.** This version detects the following cases but does not
 correct for them. They show up as `reconciled: false`:

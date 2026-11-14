@@ -29,6 +29,8 @@ Added:
   reported as `reconciled: false`; lots are never adjusted to fit.
 - Paced multi-page history reads that respect the documented limit of 20
   requests per minute.
+- `fetch_open_lots` reports `history_cached_at` and explains a mismatch that
+  may come from a trade made after the order history was cached.
 - `tests/test_readonly.py`, `tests/test_lots.py` and
   `tests/test_credentials.py`, including static checks that the source holds no
   write method names and a single HTTP call site.

@@ -24,6 +24,11 @@ Field sources are the Trading 212 OpenAPI snapshot in ``docs/api.json``:
 Lots are never invented or rescaled to match a position. When the replayed
 quantity differs from the position, the lots are returned as computed and the
 ticker is marked ``reconciled: false``.
+
+Positions and order history are cached for different lengths of time, so a
+trade made after the history was cached shows up in the position first. The
+caller passes ``history_cached_at`` when any history page came from the cache,
+and the mismatch is then attributed to that instead of being left unexplained.
 """
 
 from collections import Counter, deque
@@ -63,7 +68,8 @@ METHOD_NOTE = (
 CAUSES_NOTE = (
     "Possible causes: stock split or consolidation, ticker change, a position "
     "transferred in without a buy order, another corporate action, history "
-    "older than the fetched pages, or pie trades absent from history/orders."
+    "older than the fetched pages, pie trades absent from history/orders, or a "
+    "trade too recent to appear in the order history yet."
 )
 
 
@@ -101,6 +107,7 @@ class OpenLotsReport(BaseModel):
     truncated: bool
     pages_fetched: int
     max_pages: int
+    history_cached_at: datetime | None
     notes: list[str]
 
 
@@ -156,9 +163,16 @@ def build_open_lots(
     truncated: bool,
     pages_fetched: int,
     max_pages: int,
+    history_cached_at: datetime | None = None,
 ) -> OpenLotsReport:
-    """Replay fills into FIFO lots and reconcile each ticker with its position."""
+    """Replay fills into FIFO lots and reconcile each ticker with its position.
+
+    ``history_cached_at`` is when the oldest cached history page was retrieved,
+    or ``None`` if every page came from the network during this call.
+    """
     now = _utc(now)
+    cached_at = _utc(history_cached_at) if history_cached_at else None
+    cached_text = cached_at.isoformat().replace("+00:00", "Z") if cached_at else ""
     ledgers: dict[str, _Ledger] = {}
     unattributed = 0
     replay: list[tuple[datetime, int, int, str, Order, Fill]] = []
@@ -313,6 +327,13 @@ def build_open_lots(
                 notes.append("Lots remain but there is no open position.")
             if position is not None and not ledger.lots:
                 notes.append("No buy fills were found for this open position.")
+            if cached_at:
+                notes.append(
+                    f"The order history came from the cache, retrieved at "
+                    f"{cached_text}. A trade made since then is in the position "
+                    "but not yet in the history; call again once the history "
+                    "cache has expired."
+                )
             notes.append(CAUSES_NOTE)
             notes.append(f"truncated: {str(truncated).lower()}")
 
@@ -342,6 +363,12 @@ def build_open_lots(
         )
     else:
         report_notes.append("truncated: false. The full order history was fetched.")
+    if cached_at:
+        report_notes.append(
+            f"Order history was served from the cache; its oldest page was "
+            f"retrieved at {cached_text}. Later trades are not included until the "
+            "cache expires (TRADING212_HISTORY_TTL seconds, default 300)."
+        )
     if unattributed:
         report_notes.append(
             f"{unattributed} FILLED record(s) had no ticker and were skipped."
@@ -352,5 +379,6 @@ def build_open_lots(
         truncated=truncated,
         pages_fetched=pages_fetched,
         max_pages=max_pages,
+        history_cached_at=cached_at,
         notes=report_notes,
     )
